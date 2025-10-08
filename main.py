@@ -3,7 +3,9 @@
 # Press Shift+F10 to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
+from datetime import datetime
 from fastapi import FastAPI, Query
+from fastapi.responses import StreamingResponse
 from threading import Thread, Event
 import time
 import uvicorn
@@ -78,6 +80,20 @@ def cpu_usage():
     percent = psutil.cpu_percent(interval=1.0)
     return {"cpu_percent": percent}
 
+def time_stream(interval: float = 1.0):
+    """
+    無限迴圈回傳目前時間字串。
+    """
+    while True:
+        yield f"{datetime.now().isoformat()}\n"
+        time.sleep(interval)
+
+@app.get("/time")
+def stream_time():
+    """
+    以串流方式持續送出現在時間。
+    """
+    return StreamingResponse(time_stream(), media_type="text/plain")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
