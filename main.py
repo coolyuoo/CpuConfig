@@ -5,7 +5,7 @@
 
 from datetime import datetime
 from fastapi import FastAPI, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from threading import Thread, Event
 import time
 import uvicorn
@@ -88,7 +88,48 @@ def time_stream(interval: float = 1.0):
         yield f"{datetime.now().isoformat()}\n"
         time.sleep(interval)
 
+# GET /time: 顯示即時時間的簡易網頁。
 @app.get("/time")
+def time_page():
+    html = """
+    <html>
+        <head>
+            <title>Now</title>
+            <style>
+                body { font-family: sans-serif; background: #111; color: #0f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                #time { font-size: 2rem; white-space: pre; }
+            </style>
+        </head>
+        <body>
+            <div id="time">loading...</div>
+            <script>
+                const target = document.getElementById("time");
+                async function start() {
+                    const response = await fetch("/time/stream");
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = "";
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const parts = buffer.split("\n");
+                        buffer = parts.pop() ?? "";
+                        const latest = parts.filter(Boolean).pop();
+                        if (latest) {
+                            target.textContent = latest;
+                        }
+                    }
+                }
+                start();
+            </script>
+        </body>
+    </html>
+    """
+    return HTMLResponse(html)
+
+# GET /time/stream: 以串流方式持續送出現在時間。
+@app.get("/time/stream")
 def stream_time():
     """
     以串流方式持續送出現在時間。
