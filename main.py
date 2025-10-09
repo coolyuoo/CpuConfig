@@ -1,19 +1,10 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
 from datetime import datetime
 from fastapi import FastAPI, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
 from threading import Thread, Event
 import time
 import uvicorn
-
-try:
-    import psutil  # type: ignore
-except ImportError:
-    psutil = None
+import psutil  # type: ignore
 
 app = FastAPI()
 
