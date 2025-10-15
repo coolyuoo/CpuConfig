@@ -1,131 +1,44 @@
-from datetime import datetime
-from fastapi import FastAPI, Query
-from fastapi.responses import StreamingResponse, HTMLResponse
-from threading import Thread, Event
-import time
+from fastapi import FastAPI
+import time, os, multiprocessing as mp
 import uvicorn
-import psutil  # type: ignore
 
-app = FastAPI()
+app = FastAPI(title="CPU Demo (simple)")
 
-# 用來控制 CPU 壓力的事件旗標與執行緒
-cpu_event = Event()
-cpu_thread = None
+def burn_cpu_seconds(seconds: float) -> float:
+    target = time.process_time() + seconds
+    x = 0.0
+    while time.process_time() < target:
+        x = x * 1.0000001 + 1.0
+    return x
 
-
-def cpu_stress(percent: int, stop_event: Event):
-    """
-    根據 percent 製造指定百分比的 CPU 負載
-    """
-    period = 0.1  # 每次循環的總時間 (秒)
-    busy_time = period * percent / 100.0  # 忙碌時間
-    idle_time = period - busy_time        # 休息時間
-
-    while not stop_event.is_set():
-        start = time.time()
-        # 忙碌段
-        while (time.time() - start) < busy_time:
-            pass  # busy loop
-        # 休息段
-        time.sleep(idle_time)
-
-
-@app.get("/cpu")
-def set_cpu(percent: int = Query(..., ge=1, le=100)):
-    """
-    啟動指定百分比的 CPU 壓力
-    """
-    global cpu_thread, cpu_event
-
-    if cpu_thread and cpu_thread.is_alive():
-        return {"status": "already running"}
-
-    cpu_event.clear()
-    cpu_thread = Thread(target=cpu_stress, args=(percent, cpu_event))
-    cpu_thread.start()
-    return {"status": "started", "percent": percent}
-
-
-@app.get("/cpu/stop")
-def stop_cpu():
-    """
-    停止 CPU 壓力測試
-    """
-    global cpu_thread, cpu_event
-
-    if cpu_thread and cpu_thread.is_alive():
-        cpu_event.set()
-        cpu_thread.join()
-        return {"status": "stopped"}
-
-    return {"status": "not running"}
-
+def worker(seconds: float):
+    burn_cpu_seconds(seconds)
 
 @app.get("/")
-def cpu_usage():
-    """
-    量測最近一秒 CPU 使用率
-    """
-    if psutil is None:
-        return {"cpu_percent": None}
-    percent = psutil.cpu_percent(interval=1.0)
-    return {"cpu_percent": percent}
+def root():
+    return {"ok": True, "usage": "GET /burn/{cpu_seconds}  ，環境變數 PROCS 控制同時進程數（預設1）"}
 
-def time_stream(interval: float = 1.0):
-    """
-    無限迴圈回傳目前時間字串。
-    """
-    while True:
-        yield f"{datetime.now().isoformat()}\n"
-        time.sleep(interval)
+@app.get("/burn/{cpu_seconds}")
+def burn(cpu_seconds: float):
+    # 只保留一個參數：cpu_seconds
+    procs = int(os.getenv("PROCS", "1"))
+    procs = max(1, min(procs, os.cpu_count() or 64))
 
-# GET /time: 顯示即時時間的簡易網頁。
-@app.get("/time")
-def time_page():
-    html = """
-    <html>
-        <head>
-            <title>Now</title>
-            <style>
-                body { font-family: sans-serif; background: #111; color: #0f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                #time { font-size: 2rem; white-space: pre; }
-            </style>
-        </head>
-        <body>
-            <div id="time">loading...</div>
-            <script>
-                const target = document.getElementById("time");
-                async function start() {
-                    const response = await fetch("/time/stream");
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = "";
-                    while (true) {
-                        const { value, done } = await reader.read();
-                        if (done) break;
-                        buffer += decoder.decode(value, { stream: true });
-                        const parts = buffer.split("\n");
-                        buffer = parts.pop() ?? "";
-                        const latest = parts.filter(Boolean).pop();
-                        if (latest) {
-                            target.textContent = latest;
-                        }
-                    }
-                }
-                start();
-            </script>
-        </body>
-    </html>
-    """
-    return HTMLResponse(html)
+    start = time.perf_counter()
+    if procs == 1:
+        _ = burn_cpu_seconds(cpu_seconds)
+    else:
+        with mp.Pool(processes=procs) as pool:
+            pool.map(worker, [cpu_seconds] * procs)
+    wall = time.perf_counter() - start
 
-# GET /time/stream: 以串流方式持續送出現在時間。
-@app.get("/time/stream")
-def stream_time():
-    """
-    以串流方式持續送出現在時間。
-    """
-    return StreamingResponse(time_stream(), media_type="text/plain")
+    return {
+        "cpu_seconds_per_proc": cpu_seconds,
+        "processes_used": procs,
+        "wall_time_seconds": round(wall, 3),
+        "note": "只輸入一個參數。要示範多核，改環境變數 PROCS；要示範限速，用 --cpus。",
+    }
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), workers=1)
