@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 import time, os, multiprocessing as mp
+import math
 import uvicorn
 
 app = FastAPI(title="CPU Demo (simple)")
@@ -18,26 +19,15 @@ def worker(seconds: float):
 def root():
     return {"ok": True, "usage": "GET /burn/{cpu_seconds}  ，環境變數 PROCS 控制同時進程數（預設1）"}
 
-@app.get("/burn/{cpu_seconds}")
-def burn(cpu_seconds: float):
-    # 只保留一個參數：cpu_seconds
-    procs = int(os.getenv("PROCS", "1"))
-    procs = max(1, min(procs, os.cpu_count() or 64))
-
-    start = time.perf_counter()
-    if procs == 1:
-        _ = burn_cpu_seconds(cpu_seconds)
-    else:
-        with mp.Pool(processes=procs) as pool:
-            pool.map(worker, [cpu_seconds] * procs)
-    wall = time.perf_counter() - start
-
-    return {
-        "cpu_seconds_per_proc": cpu_seconds,
-        "processes_used": procs,
-        "wall_time_seconds": round(wall, 3),
-        "note": "只輸入一個參數。要示範多核，改環境變數 PROCS；要示範限速，用 --cpus。",
-    }
+@app.get("/burn")
+def burn(sec: float = 3.0):
+    t0 = time.perf_counter()
+    # 單執行緒 busy loop（Python GIL 反而剛好：一條線就能吃滿 quota）
+    x = 0.0
+    while time.perf_counter() - t0 < sec:
+        # 做點浮點運算避免被最佳化
+        x += math.sin(x) * math.cos(x) + math.sqrt(12345.6789)
+    return {"ok": True, "wall_seconds": time.perf_counter() - t0}
 
 
 if __name__ == "__main__":
